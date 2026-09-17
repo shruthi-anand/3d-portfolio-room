@@ -1,2 +1,2 @@
-# 3d-portfolio-room-
+# 3d-portfolio-room
 A spatial portfolio
