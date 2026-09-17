@@ -1,0 +1,1402 @@
+<!--
+  3D Spatial Portfolio — Room Experience
+  Three.js: v0.160.0 via unpkg CDN (ES modules + import map; addons:
+  EffectComposer, RenderPass, UnrealBloomPass, OutputPass).
+  v3 (09-UX-NAVIGATION-BRIEF.md §1 + §6): all five zone labels legible and
+  crisp from the first view (pixel-snapped, edge-clamped with directional
+  arrows when out of frame); dark/light mode toggle next to "Contact Me".
+  v4 (08-VISUAL-STYLE-BRIEF.md): full style pass — warm charcoal/off-white
+  dual-mode palette, hand-drawn wobbly grid lines, solid flat-shaded
+  low-poly "toy" assets replacing the neon wireframes, warm lighting +
+  ACES tone mapping, softened bloom, rounded friendly type (Nunito),
+  labels on solid pills (never blurred). Layout/behavior untouched.
+  Decision (brief §5 flag): the wireframe VR hand cursor is replaced by a
+  soft dot-and-ring cursor — friendlier fit for the toy direction.
+  v5 (10-ZONE-ASSETS-BRIEF.md): each opening now has themed emerging assets
+  and its own recessed inner world (pocket scene behind the aperture):
+  Outside of Work = keepsake cluster + airy green sky behind glass; UX =
+  phone with an animated scrolling mockup screen in a calm gradient;
+  Architecture = TEMPORARY massing placeholder + plain sky; Resume/Contact
+  = mock resume sheet + contact tag over a wooden desk with a pencil;
+  Learning Lab = two friendly abstract AI-chat bots (no real branding) with
+  an orbiting atom motif on a white/coral/charcoal gradient.
+  Known limitations:
+    - Contact form has no backend yet: "Send" opens the visitor's mail client
+      via a prefilled mailto: link. Replace with real form handling later.
+    - Zone routes use relative .html files (ux-portfolio.html, etc.) so the
+      site works straight from disk; swap for clean routes when hosted.
+    - Email address is a placeholder (see CONTACT_EMAIL constant).
+    - Theme is per-session only — intentionally no browser storage.
+    - Requires network access for the Three.js CDN and Google Fonts.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Shruthi — Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Dark mode: warm charcoal dusk, not a void (brief §2/§3) */
+    --void:#1C1A1E;
+    --ui-text:#F2EDE4;
+    --gold:#F5C56B;
+    --center-glow:#F5E6C8;
+    --cyan:#4CE0D2;
+    --magenta:#C77DFF;
+    --star:#8F8578;
+    --arch:#5C7CFA;
+    --panel:rgba(32,29,34,0.94);
+    --panel-border:rgba(214,200,180,0.16);
+    --field:rgba(214,200,180,0.08);
+    --field-border:rgba(214,200,180,0.2);
+    --label-bg:rgba(28,26,30,0.78);
+    --label-border:rgba(242,237,228,0.14);
+  }
+  /* Light mode: warm sketchbook page — designed bright, not inverted (brief §2) */
+  html[data-theme="light"]{
+    --void:#F5F1E8;
+    --ui-text:#3A342C;
+    --gold:#C08A24;
+    --center-glow:#B8862E; /* zone hues kept, deepened for contrast on paper */
+    --cyan:#0E9C8F;
+    --magenta:#9A4FD6;
+    --star:#A79C8E;
+    --arch:#3F5BD9;
+    --panel:rgba(252,248,240,0.96);
+    --panel-border:rgba(120,105,85,0.18);
+    --field:rgba(120,105,85,0.07);
+    --field-border:rgba(120,105,85,0.22);
+    --label-bg:rgba(255,252,246,0.88);
+    --label-border:rgba(90,80,64,0.16);
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; overflow:hidden; }
+  body{
+    background:var(--void);
+    color:var(--ui-text);
+    font-family:'Nunito',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* Soft warm vignette */
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:2;
+    background:radial-gradient(ellipse at center, transparent 58%, rgba(18,13,10,0.45) 100%);
+  }
+  html[data-theme="light"] body::after{
+    background:radial-gradient(ellipse at center, transparent 62%, rgba(96,80,58,0.12) 100%);
+  }
+  #scene-canvas{ position:fixed; inset:0; display:block; touch-action:none; z-index:1; }
+  @media (pointer:fine){ #scene-canvas{ cursor:none; } }
+
+  /* ---------- Zone labels: screen-space pills, always crisp (briefs 08 §4 / 09 §1) ---------- */
+  #labels{ position:fixed; inset:0; pointer-events:none; z-index:3; }
+  .obj-label{
+    position:absolute; left:0; top:0;
+    transform:translate(-50%,-50%);
+    font-family:'Nunito',sans-serif; font-weight:800;
+    font-size:clamp(13px,1.5vw,16px); line-height:1.2;
+    letter-spacing:0.02em; white-space:nowrap; text-align:center;
+    padding:8px 16px; border-radius:999px;
+    background:var(--label-bg); border:1px solid var(--label-border);
+    opacity:0; will-change:opacity,transform;
+  }
+  .obj-label .sub{
+    display:block; margin-top:2px;
+    font-weight:600; font-size:0.76em; opacity:0.65;
+  }
+  /* §1 (09): directional indicator when a zone is out of frame — the label
+     stays pinned (crisp, legible) at the screen edge with an arrow toward it */
+  .obj-label:not([data-dir=""])::before{
+    content:attr(data-dir);
+    display:inline-block; margin-right:8px; opacity:0.75;
+  }
+  #label-ux  { color:var(--center-glow); }
+  #label-arch{ color:var(--arch); }
+  #label-lab { color:var(--cyan); }
+  #label-out { color:var(--magenta); }
+  #label-cv  { color:var(--gold); }
+
+  /* ---------- Cursor: soft dot-and-ring (replaces the VR wireframe hand) ---------- */
+  #hand{
+    position:fixed; left:0; top:0; z-index:6; pointer-events:none;
+    width:24px; height:24px; transform:translate(-50%,-50%);
+    opacity:0.7; transition:opacity .18s;
+    --hand-color:var(--ui-text);
+    display:none; /* shown on non-touch devices by JS */
+  }
+  #hand.on{ display:block; }
+  #hand.off{ opacity:0; }
+  #hand.hover{ opacity:1; }
+  #hand .dot{
+    position:absolute; inset:8px; border-radius:50%;
+    background:var(--hand-color);
+    transition:inset .15s, background .15s;
+  }
+  #hand .ring{
+    position:absolute; inset:0; border-radius:50%;
+    border:2px solid var(--hand-color); opacity:0.5;
+    transition:transform .18s ease, opacity .18s, border-color .15s;
+  }
+  #hand.hover .ring{ transform:scale(1.55); opacity:0.9; }
+  #hand.hover .dot{ inset:7px; }
+  @keyframes cursorTap{
+    0%{ transform:translate(-50%,-50%) scale(1); }
+    40%{ transform:translate(-50%,-50%) scale(0.72); }
+    100%{ transform:translate(-50%,-50%) scale(1); }
+  }
+  #hand.click{ animation:cursorTap .28s ease-out; }
+
+  /* ---------- Compass HUD ---------- */
+  #compass{
+    position:fixed; right:clamp(14px,3vw,28px); bottom:clamp(14px,3vh,24px);
+    z-index:5; pointer-events:none; text-align:right;
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:12px; line-height:1.9;
+    letter-spacing:0.05em;
+    color:var(--star); opacity:0.7;
+  }
+
+  /* ---------- Top chrome ---------- */
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:10;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:clamp(14px,3vw,26px) clamp(16px,3.5vw,32px);
+    pointer-events:none;
+  }
+  header > *{ pointer-events:auto; }
+  #menu-btn{
+    display:flex; align-items:center; gap:10px;
+    background:none; border:0; color:var(--ui-text); cursor:pointer;
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:13px; letter-spacing:0.08em;
+    text-transform:uppercase; padding:8px 4px; opacity:0.85;
+    transition:opacity .2s;
+  }
+  #menu-btn:hover{ opacity:1; }
+  #menu-btn .bars{ display:inline-flex; flex-direction:column; gap:5px; }
+  #menu-btn .bars span{ display:block; width:20px; height:2px; border-radius:2px; background:var(--ui-text); }
+  .util-cluster{ display:flex; align-items:center; gap:12px; }
+  #mode-btn{
+    width:42px; height:42px; border-radius:999px;
+    background:transparent; border:1.5px solid var(--field-border);
+    color:var(--ui-text); cursor:pointer;
+    display:grid; place-items:center;
+    transition:transform .15s, border-color .2s;
+  }
+  #mode-btn:hover{ transform:translateY(-1px); border-color:var(--gold); }
+  #mode-btn svg{ width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
+  #mode-btn .icon-moon{ display:none; }
+  html[data-theme="light"] #mode-btn .icon-sun{ display:none; }
+  html[data-theme="light"] #mode-btn .icon-moon{ display:block; }
+  #contact-btn{
+    background:var(--gold); color:#241A06; border:0; cursor:pointer;
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:13.5px;
+    letter-spacing:0.03em; padding:11px 22px; border-radius:999px;
+    box-shadow:0 4px 18px rgba(200,150,60,0.35);
+    transition:transform .15s, box-shadow .2s;
+  }
+  #contact-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 24px rgba(200,150,60,0.5); }
+  html[data-theme="light"] #contact-btn{ color:#FFFDF7; }
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible{
+    outline:2px solid var(--gold); outline-offset:3px; border-radius:4px;
+  }
+
+  /* ---------- Menu drawer ---------- */
+  #drawer-scrim, #modal-scrim{
+    position:fixed; inset:0; z-index:20; background:rgba(14,11,9,0.55);
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
+    opacity:0; pointer-events:none; transition:opacity .25s;
+  }
+  html[data-theme="light"] #drawer-scrim, html[data-theme="light"] #modal-scrim{
+    background:rgba(120,105,85,0.32);
+  }
+  #drawer-scrim.open, #modal-scrim.open{ opacity:1; pointer-events:auto; }
+  #drawer{
+    position:fixed; top:0; bottom:0; left:0; z-index:21;
+    width:min(320px,85vw); padding:88px 36px 36px;
+    background:var(--panel); border-right:1px solid var(--panel-border);
+    transform:translateX(-100%); transition:transform .3s cubic-bezier(.22,.8,.3,1);
+  }
+  #drawer.open{ transform:translateX(0); }
+  #drawer nav{ display:flex; flex-direction:column; gap:6px; }
+  #drawer a, #drawer button.navlink{
+    display:block; width:100%; text-align:left; background:none; border:0; cursor:pointer;
+    color:var(--ui-text); text-decoration:none;
+    font-family:'Nunito',sans-serif; font-size:21px; font-weight:700;
+    padding:12px 6px; border-radius:10px; opacity:0.82; transition:opacity .15s, padding-left .2s;
+  }
+  #drawer a:hover, #drawer button.navlink:hover{ opacity:1; padding-left:14px; }
+  #drawer .drawer-eyebrow{
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:11px; letter-spacing:0.18em;
+    text-transform:uppercase; color:var(--star); margin-bottom:18px;
+  }
+  .close-x{
+    position:absolute; top:18px; right:18px;
+    background:none; border:0; color:var(--ui-text); cursor:pointer;
+    font-size:22px; line-height:1; padding:8px; opacity:0.7; transition:opacity .15s;
+  }
+  .close-x:hover{ opacity:1; }
+
+  /* ---------- Contact modal ---------- */
+  #modal{
+    position:fixed; z-index:22; top:50%; left:50%;
+    transform:translate(-50%,-50%) scale(0.97);
+    width:min(460px,calc(100vw - 32px));
+    max-height:calc(100dvh - 48px); overflow-y:auto;
+    background:var(--panel); border:1px solid var(--panel-border);
+    border-radius:20px; padding:32px 28px 28px;
+    box-shadow:0 20px 60px rgba(12,9,7,0.55);
+    opacity:0; pointer-events:none; transition:opacity .22s, transform .22s;
+  }
+  html[data-theme="light"] #modal{ box-shadow:0 20px 60px rgba(96,80,58,0.28); }
+  #modal.open{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+  #modal h2{ font-size:23px; font-weight:800; margin-bottom:4px; }
+  #modal .modal-sub{ font-size:13.5px; color:var(--star); margin-bottom:22px; }
+  .email-row{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:var(--field); border:1px solid var(--field-border);
+    border-radius:12px; padding:12px 14px; margin-bottom:22px;
+  }
+  .email-row code{
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:13.5px; color:var(--center-glow);
+    flex:1 1 auto; word-break:break-all;
+  }
+  #copy-btn{
+    background:none; border:1.5px solid var(--gold); color:var(--gold);
+    border-radius:999px; padding:6px 16px; cursor:pointer;
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:12.5px;
+    transition:background .15s, color .15s;
+  }
+  #copy-btn:hover{ background:rgba(200,150,60,0.14); }
+  #copy-btn.copied{ background:var(--gold); color:#241A06; }
+  html[data-theme="light"] #copy-btn.copied{ color:#FFFDF7; }
+  #contact-form{ display:flex; flex-direction:column; gap:12px; }
+  #contact-form label{
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:11px; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--star);
+  }
+  #contact-form input, #contact-form textarea{
+    width:100%; background:var(--field); border:1px solid var(--field-border);
+    border-radius:10px; color:var(--ui-text); padding:10px 12px;
+    font-family:'Nunito',sans-serif; font-size:14px; margin-top:5px;
+  }
+  #contact-form textarea{ min-height:96px; resize:vertical; }
+  #send-btn{
+    align-self:flex-start; margin-top:6px;
+    background:var(--gold); color:#241A06; border:0; cursor:pointer;
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:14px;
+    padding:11px 26px; border-radius:999px;
+    transition:transform .15s;
+  }
+  html[data-theme="light"] #send-btn{ color:#FFFDF7; }
+  #send-btn:hover{ transform:translateY(-1px); }
+  #form-note{ font-size:12.5px; color:var(--star); }
+
+  /* ---------- First-load hint & motion permission ---------- */
+  #hint{
+    position:fixed; bottom:clamp(24px,6vh,54px); left:50%; transform:translateX(-50%);
+    z-index:5; pointer-events:none;
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:12.5px; letter-spacing:0.06em;
+    color:var(--star);
+    opacity:0; transition:opacity 1.2s; white-space:nowrap;
+  }
+  #hint.show{ opacity:0.9; }
+  #motion-btn{
+    position:fixed; bottom:clamp(70px,12vh,110px); left:50%; transform:translateX(-50%);
+    z-index:11; display:none;
+    background:rgba(76,224,210,0.12); border:1.5px solid var(--cyan);
+    color:var(--cyan); border-radius:999px; padding:10px 22px; cursor:pointer;
+    font-family:'Nunito',sans-serif; font-weight:700; font-size:12.5px; letter-spacing:0.04em;
+  }
+  #motion-btn.show{ display:block; }
+
+  @media (prefers-reduced-motion: reduce){
+    #drawer, #modal, #contact-btn, #send-btn, #hand .ring, #hand .dot{ transition:none; }
+    #hand.click{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene-canvas" aria-label="Interactive 3D room: move your mouse to look around, WASD to walk"></canvas>
+
+<!-- Projected HTML labels for the five zone openings -->
+<div id="labels" aria-hidden="true">
+  <div class="obj-label" id="label-ux">UX Portfolio<span class="sub">current work — click to enter</span></div>
+  <div class="obj-label" id="label-arch">Architecture</div>
+  <div class="obj-label" id="label-lab">Learning Lab &amp; Playground</div>
+  <div class="obj-label" id="label-out">Shruthi, Outside of Work</div>
+  <div class="obj-label" id="label-cv">Resume &amp; Contact</div>
+</div>
+
+<!-- Soft dot-and-ring cursor (decision per 08 §5: replaces the VR wireframe hand) -->
+<div id="hand" aria-hidden="true">
+  <div class="ring"></div>
+  <div class="dot"></div>
+</div>
+
+<header>
+  <button id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">
+    <span class="bars"><span></span><span></span><span></span></span>
+    Menu
+  </button>
+  <div class="util-cluster">
+    <button id="mode-btn" aria-label="Switch to light mode" aria-pressed="false">
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2.5v2.6 M12 18.9v2.6 M2.5 12h2.6 M18.9 12h2.6 M5.2 5.2l1.9 1.9 M16.9 16.9l1.9 1.9 M18.8 5.2l-1.9 1.9 M7.1 16.9l-1.9 1.9"/>
+      </svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20 14.5A8.4 8.4 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/>
+      </svg>
+    </button>
+    <button id="contact-btn" aria-haspopup="dialog">Contact Me</button>
+  </div>
+</header>
+
+<!-- Menu drawer — direct-jump fallback to all five zones -->
+<div id="drawer-scrim"></div>
+<aside id="drawer" role="navigation" aria-label="Site navigation" aria-hidden="true">
+  <button class="close-x" id="drawer-close" aria-label="Close menu">&times;</button>
+  <div class="drawer-eyebrow">Navigate</div>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="ux-portfolio.html">UX Portfolio</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lab.html">Learning Lab</a>
+    <a href="outside-work.html">Outside of Work</a>
+    <button class="navlink" id="drawer-contact">Resume &amp; Contact</button>
+  </nav>
+</aside>
+
+<!-- Contact modal (behavior preserved) -->
+<div id="modal-scrim"></div>
+<div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+  <button class="close-x" id="modal-close" aria-label="Close contact panel">&times;</button>
+  <h2 id="modal-title">Say hello</h2>
+  <p class="modal-sub">Recruiter, collaborator, or curious — all welcome.</p>
+  <div class="email-row">
+    <code id="email-text">hello@shruthi.dev</code><!-- placeholder address — replace with real one -->
+    <button id="copy-btn">Copy</button>
+  </div>
+  <!-- NOTE: no backend yet — "Send" opens the visitor's mail client via a
+       prefilled mailto: link. Swap this handler for real form submission later. -->
+  <form id="contact-form" novalidate>
+    <div><label for="cf-name">Name</label><input id="cf-name" name="name" type="text" autocomplete="name"></div>
+    <div><label for="cf-email">Your email</label><input id="cf-email" name="email" type="email" autocomplete="email"></div>
+    <div><label for="cf-msg">Message</label><textarea id="cf-msg" name="message"></textarea></div>
+    <button id="send-btn" type="submit">Send message</button>
+    <p id="form-note">Opens your email app with the message prefilled — no data leaves this page.</p>
+  </form>
+</div>
+
+<div id="hint">Move your mouse to look around</div>
+<button id="motion-btn">Tap to enable motion</button>
+
+<!-- Compass HUD: every zone findable at a glance -->
+<div id="compass" aria-hidden="true">
+  ← Architecture&nbsp;&nbsp;•&nbsp;&nbsp;UX Portfolio ahead&nbsp;&nbsp;•&nbsp;&nbsp;Learning Lab →<br>
+  ↑ Outside of Work&nbsp;&nbsp;•&nbsp;&nbsp;↓ Resume &amp; Contact
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* =========================================================================
+   0. Config & environment detection
+   ========================================================================= */
+const CONTACT_EMAIL = 'hello@shruthi.dev'; // placeholder — replace with the real address
+const ROUTES = { ux:'ux-portfolio.html', arch:'architecture.html', lab:'lab.html', out:'outside-work.html' };
+
+const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Zone identity hues stay consistent across modes (brief 08 §3); cursor tint
+// uses slightly deepened variants in light mode purely for contrast.
+const COLORS = {
+  void:0x1C1A1E,                 // warm charcoal (dark-mode base, brief §3)
+  centerGlow:0xF5E6C8, gold:0xF5C56B,
+  cyan:0x4CE0D2, magenta:0xC77DFF,
+  arch:0x5C7CFA,
+  grid:0x6B6560,                 // soft warm grey hand-drawn grid (dark)
+  star:0xA89880,                 // warm dust motes at dusk
+  cream:0xFFF6E4,                // "screen"/paper detail color on assets
+  coral:0xE07856,                // warm coral accent (Lab bot + inner gradient)
+  wood:0x8A5A33, paper:0xFFFDF6, ink:0x3A3430,
+};
+const ZONE_HEX = {
+  dark:  { ux:'#F5E6C8', arch:'#5C7CFA', lab:'#4CE0D2', out:'#C77DFF', cv:'#F5C56B', idle:'#F2EDE4' },
+  light: { ux:'#B8862E', arch:'#3F5BD9', lab:'#0E9C8F', out:'#9A4FD6', cv:'#C08A24', idle:'#3A342C' },
+};
+let currentTheme = 'dark'; // declared up here — the render loop reads it before the UI section runs
+
+// Room scale (chosen so the room reads "large" at eye level). Tweak here.
+const ROOM = { hx:12, hy:5, backZ:-16, frontZ:8 };
+// Soft movement bounds: keeps every surface reachable, never clips a wall.
+const BOUNDS = { x:9.5, zMin:-13.5, zMax:6 };
+const MOVE_SPEED = 4.2;
+
+// Position-mapped free look (no pointer lock, so clicking stays reliable):
+// full mouse travel sweeps ±115° yaw and ±72° pitch — enough to face all
+// five surfaces, with the same damped-lerp feel throughout.
+const YAW_RANGE   = THREE.MathUtils.degToRad(115);
+const PITCH_RANGE = THREE.MathUtils.degToRad(72);
+
+/* =========================================================================
+   1. Scene, camera, renderer, lights, bloom
+   ========================================================================= */
+const canvas = document.getElementById('scene-canvas');
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(COLORS.void);
+scene.fog = new THREE.Fog(COLORS.void, 10, 42); // distance falloff for the grid
+
+// §1 (09): FOV widened slightly (74 / 98) so all five zone labels fit the first view
+function fovForAspect(aspect){ return aspect < 1 ? 98 : 74; }
+
+const camera = new THREE.PerspectiveCamera(fovForAspect(innerWidth/innerHeight), innerWidth/innerHeight, 0.1, 120);
+camera.position.set(0, 0, 4); // entry point, near the front of the room
+camera.rotation.order = 'YXZ'; // FPS-style yaw/pitch
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, IS_TOUCH ? 1.5 : 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // gentle warm grading (brief §1)
+renderer.toneMappingExposure = 1.0;
+
+// Warm lighting rig — the toy assets are lit, not self-glowing (brief §1)
+const hemi = new THREE.HemisphereLight(0x9C8CA8, 0x3A322C, 0.55);
+const sun  = new THREE.DirectionalLight(0xFFC98A, 1.15);
+sun.position.set(4, 8, 6);
+const amb  = new THREE.AmbientLight(0xFFFFFF, 0.12);
+scene.add(hemi, sun, amb);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+// Bloom kept, but soft and threshold-gated — a warm lamp glow, not neon
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight),
+  IS_TOUCH ? 0.25 : 0.35, 0.55, 0.75);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* =========================================================================
+   2. Background dust motes (former star field, warmed; hidden in light mode)
+   ========================================================================= */
+const STAR_COUNT = IS_TOUCH ? 160 : 420;
+let starMat; // theme switching needs a handle on this material
+{
+  const pos = new Float32Array(STAR_COUNT * 3);
+  for (let i = 0; i < STAR_COUNT; i++){
+    const r = 45 + Math.random()*40;
+    const th = Math.random()*Math.PI*2, ph = Math.acos(2*Math.random()-1);
+    pos[i*3]   = r*Math.sin(ph)*Math.cos(th);
+    pos[i*3+1] = r*Math.sin(ph)*Math.sin(th) * 0.6;
+    pos[i*3+2] = r*Math.cos(ph);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  starMat = new THREE.PointsMaterial({
+    color:COLORS.star, size:0.22, sizeAttenuation:true,
+    transparent:true, opacity:0.4, depthWrite:false,
+  });
+  scene.add(new THREE.Points(g, starMat));
+}
+
+/* =========================================================================
+   3. The room — hand-drawn grid on floor, ceiling, four walls (brief §2):
+   each line is a wobbly polyline with per-line "pen pressure" variation.
+   ========================================================================= */
+function makeGrid(w, h, nx, ny, opacity){
+  const SUB = 8, AMP = 0.07; // wobble subdivisions + amplitude (world units)
+  const positions = [], colors = [];
+  function addLine(ax, ay, bx, by){
+    const weight = 0.72 + Math.random()*0.5;      // uneven line weight per stroke
+    const phase = Math.random()*Math.PI*2;
+    const freq  = 1 + Math.random()*2;
+    const horizontal = Math.abs(bx-ax) > Math.abs(by-ay);
+    let px = ax, py = ay;
+    for (let s = 1; s <= SUB; s++){
+      const t = s/SUB;
+      let x = ax + (bx-ax)*t, y = ay + (by-ay)*t;
+      // perpendicular wobble, pinned at both ends so corners still meet
+      const wob = Math.sin(t*Math.PI) *
+        (Math.sin(t*freq*Math.PI*2 + phase)*AMP + (Math.random()-0.5)*AMP*0.6);
+      if (horizontal) y += wob; else x += wob;
+      if (s === SUB){ x = bx; y = by; }
+      positions.push(px,py,0, x,y,0);
+      const wv = weight * (0.9 + Math.random()*0.2); // slight variation along the stroke
+      colors.push(wv,wv,wv, wv,wv,wv);
+      px = x; py = y;
+    }
+  }
+  for (let i = 0; i <= nx; i++){ const x = -w/2 + (w/nx)*i; addLine(x,-h/2, x,h/2); }
+  for (let j = 0; j <= ny; j++){ const y = -h/2 + (h/ny)*j; addLine(-w/2,y, w/2,y); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const m = new THREE.LineBasicMaterial({
+    color:COLORS.grid, vertexColors:true, transparent:true, opacity, depthWrite:false,
+  });
+  m.userData.isGrid = true; // theme switcher recolors these
+  return new THREE.LineSegments(g, m);
+}
+{
+  const W = ROOM.hx*2, H = ROOM.hy*2, D = ROOM.frontZ - ROOM.backZ;
+  const zMid = (ROOM.frontZ + ROOM.backZ) / 2;
+  const surfaces = [
+    { g:makeGrid(W, H, 24, 10, 0.55), pos:[0, 0, ROOM.backZ],  rot:[0,0,0] },            // back wall
+    { g:makeGrid(W, H, 24, 10, 0.32), pos:[0, 0, ROOM.frontZ], rot:[0,0,0] },            // wall behind entry
+    { g:makeGrid(D, H, 24, 10, 0.48), pos:[-ROOM.hx, 0, zMid], rot:[0, Math.PI/2, 0] },  // left wall
+    { g:makeGrid(D, H, 24, 10, 0.48), pos:[ ROOM.hx, 0, zMid], rot:[0,-Math.PI/2, 0] },  // right wall
+    { g:makeGrid(W, D, 24, 24, 0.55), pos:[0, -ROOM.hy, zMid], rot:[-Math.PI/2, 0, 0] }, // floor
+    { g:makeGrid(W, D, 24, 24, 0.42), pos:[0,  ROOM.hy, zMid], rot:[ Math.PI/2, 0, 0] }, // ceiling
+  ];
+  for (const s of surfaces){ s.g.position.set(...s.pos); s.g.rotation.set(...s.rot); scene.add(s.g); }
+}
+
+/* =========================================================================
+   4. Asset helpers — solid flat-shaded "toy" materials (brief §1):
+   chunky low-poly volumes under warm light, hover = gentle emissive lift.
+   ========================================================================= */
+function zoneMat(color, opts = {}){
+  const m = new THREE.MeshStandardMaterial({
+    color, roughness:0.85, metalness:0, flatShading:true,
+    emissive:color, emissiveIntensity:0.08, ...opts,
+  });
+  m.userData.isZoneMat = true; // hover-brightness driver picks these up
+  m.userData.baseEmissive = m.emissiveIntensity; // authored rest level (e.g. lit windows)
+  return m;
+}
+const box = (w,h,d,mat) => new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+// Collect every zone material in a group so hover can drive them from one value
+function collectMats(group){
+  const mats = [];
+  group.traverse(o => {
+    if (o.isMesh && o.material && o.material.userData.isZoneMat && !mats.includes(o.material)){
+      mats.push(o.material);
+    }
+  });
+  return mats;
+}
+// Chunky picture-frame around each opening: four fat bars, toy-like
+function makeChunkyFrame(w, h, color){
+  const g = new THREE.Group();
+  const mat = zoneMat(color);
+  const T = 0.24, D = 0.18;
+  const top = box(w + T, T, D, mat);    top.position.y =  h/2;
+  const bot = box(w + T, T, D, mat);    bot.position.y = -h/2;
+  const lft = box(T, h - T, D, mat);    lft.position.x = -w/2;
+  const rgt = box(T, h - T, D, mat);    rgt.position.x =  w/2;
+  g.add(top, bot, lft, rgt);
+  g.userData.mat = mat;
+  return g;
+}
+
+/* =========================================================================
+   5. Zone assets & inner worlds (10-ZONE-ASSETS-BRIEF.md)
+   Each opening gets themed emerging assets plus its own recessed "pocket"
+   scene behind the aperture, distinct from the shared grid room.
+   ========================================================================= */
+const updaters = []; // per-frame animation hooks for assets/environments
+
+function canvasTex(w, h, draw){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function gradientTex(stops, w = 4, h = 256){
+  return canvasTex(w, h, (ctx) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    for (const [p, col] of stops) g.addColorStop(p, col);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  });
+}
+function rr(ctx, x, y, w, h, r){ // rounded-rect path
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);     ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+// Recessed pocket world behind an opening: back panel + four inward side walls.
+// Local coords: aperture at z=0 (facing the room), pocket extends to z=-depth.
+function makePocket(w, h, d, backMat, sideColor){
+  const g = new THREE.Group();
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), backMat);
+  back.position.z = -d;
+  const sm = new THREE.MeshBasicMaterial({ color:sideColor, fog:false });
+  const mk = (pw, ph) => new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), sm);
+  const L = mk(d, h); L.rotation.y =  Math.PI/2; L.position.set(-w/2, 0, -d/2);
+  const R = mk(d, h); R.rotation.y = -Math.PI/2; R.position.set( w/2, 0, -d/2);
+  const T = mk(w, d); T.rotation.x =  Math.PI/2; T.position.set(0,  h/2, -d/2);
+  const B = mk(w, d); B.rotation.x = -Math.PI/2; B.position.set(0, -h/2, -d/2);
+  g.add(back, L, R, T, B);
+  return g;
+}
+const envMat = (color) => new THREE.MeshStandardMaterial({ color, flatShading:true, roughness:0.9, fog:false });
+
+/* ---------- UX Portfolio: a phone with a live-scrolling mockup screen ---------- */
+let uxScreenCtx = null, uxScreenTex = null;
+function drawPhoneScreen(ctx, t){
+  const W = 256, H = 512;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#FFF4E4'); g.addColorStop(1, '#FFD9B8');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // looping scroll of mock project screens
+  const CARD = 150, GAP = 26;
+  const off = (t*55) % (CARD + GAP);
+  const cols = ['#F5C56B', '#4CE0D2', '#C77DFF', '#5C7CFA'];
+  for (let i = -1; i < 4; i++){
+    const y = 60 + i*(CARD + GAP) - off;
+    const ci = ((i % 4) + 4) % 4;
+    ctx.fillStyle = '#FFFFFF'; rr(ctx, 18, y, W-36, CARD, 14); ctx.fill();
+    ctx.fillStyle = cols[ci];  rr(ctx, 18, y, W-36, 54, 14);   ctx.fill();
+    ctx.fillStyle = '#D9CFC2';
+    ctx.fillRect(32, y+72, W-96, 12); ctx.fillRect(32, y+96, W-130, 12); ctx.fillRect(32, y+120, W-110, 12);
+  }
+  ctx.fillStyle = '#3A3430'; ctx.fillRect(0, 0, W, 36); // status bar on top
+  ctx.fillStyle = '#FFF4E4'; rr(ctx, 16, 12, 46, 12, 6); ctx.fill();
+}
+function buildUX(){
+  // The one emerging object for the primary zone: a chunky phone (brief §UX)
+  const g = new THREE.Group();
+  g.add(box(1.6, 3.2, 0.18, zoneMat(0x2E2A33, { roughness:0.6 })));
+  const c = document.createElement('canvas'); c.width = 256; c.height = 512;
+  uxScreenCtx = c.getContext('2d');
+  uxScreenTex = new THREE.CanvasTexture(c);
+  uxScreenTex.colorSpace = THREE.SRGBColorSpace;
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.44, 3.0),
+    new THREE.MeshBasicMaterial({ map:uxScreenTex, fog:false }));
+  scr.position.z = 0.1;
+  const cam = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 8), zoneMat(0x141216));
+  cam.rotation.x = Math.PI/2; cam.position.set(0, 1.42, 0.1);
+  g.add(scr, cam);
+  updaters.push((t) => { drawPhoneScreen(uxScreenCtx, t); uxScreenTex.needsUpdate = true; });
+  return g;
+}
+
+/* ---------- Architecture: TEMPORARY placeholder massing models ---------- */
+function buildArch(){
+  // TEMPORARY per brief — simple massing cluster, to be replaced with real project work
+  const g = new THREE.Group();
+  const m = zoneMat(COLORS.arch);
+  const warm = zoneMat(COLORS.gold, { emissiveIntensity:0.35 }); // lit windows, cozy
+  const b1 = box(0.9, 1.6, 0.9, m);  b1.position.set(-0.9, -0.1, 0);
+  const b2 = box(1.1, 1.0, 1.0, m);  b2.position.set(0.35, -0.4, 0.2);
+  const b3 = box(0.7, 2.1, 0.7, m);  b3.position.set(1.35, 0.15, -0.2);
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.15, 3, 1), m);
+  roof.rotation.z = Math.PI/2; roof.rotation.y = Math.PI/2; roof.position.set(0.35, 0.25, 0.2);
+  const w1 = box(0.22, 0.22, 0.06, warm); w1.position.set(-0.9, 0.25, 0.47);
+  const w2 = box(0.2, 0.2, 0.06, warm);   w2.position.set(1.35, 0.8, 0.17);
+  g.add(b1, b2, b3, roof, w1, w2);
+  return g;
+}
+
+/* ---------- Learning Lab: two friendly abstract AI-chat bots + atom motif ---------- */
+// Deliberately generic cute robots "inspired by the idea of an AI chat" —
+// not a reproduction of any company's actual mascot, logo, or wordmark.
+function makeBot(bodyHex, faceHex){
+  const g = new THREE.Group();
+  const bm = zoneMat(bodyHex, { roughness:0.7 });
+  const dark = zoneMat(0x2A2530);
+  const body = box(0.6, 0.55, 0.42, bm);  body.position.y = -0.1;
+  const head = box(0.5, 0.4, 0.4, bm);    head.position.y = 0.35;
+  const face = box(0.36, 0.22, 0.05, zoneMat(faceHex)); face.position.set(0, 0.35, 0.21);
+  const e1 = box(0.06, 0.1, 0.06, dark);  e1.position.set(-0.09, 0.36, 0.24);
+  const e2 = box(0.06, 0.1, 0.06, dark);  e2.position.set( 0.09, 0.36, 0.24);
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 6), bm); ant.position.y = 0.64;
+  const tip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.05, 0), zoneMat(faceHex)); tip.position.y = 0.76;
+  const f1 = box(0.16, 0.1, 0.3, dark);   f1.position.set(-0.16, -0.43, 0);
+  const f2 = box(0.16, 0.1, 0.3, dark);   f2.position.set( 0.16, -0.43, 0);
+  g.add(body, head, face, e1, e2, ant, tip, f1, f2);
+  return g;
+}
+function buildLab(){
+  const g = new THREE.Group();
+  const warmBot = makeBot(COLORS.coral, COLORS.cream); warmBot.position.set(-0.65, -0.15, 0); warmBot.rotation.y = 0.25;
+  const coolBot = makeBot(0x6FA8FF, 0xEFF5FF);         coolBot.position.set( 0.65, -0.15, 0); coolBot.rotation.y = -0.25;
+  const mat = zoneMat(COLORS.cyan);
+  const orbit = new THREE.Group();
+  const r1 = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.05, 6, 18), mat); r1.rotation.x = 1.2;
+  const r2 = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.05, 6, 18), mat); r2.rotation.set(-0.9, 0.6, 0.2);
+  orbit.add(r1, r2);
+  const parts = [];
+  for (let i = 0; i < 3; i++){
+    const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.07, 0), mat);
+    orbit.add(p); parts.push({ p, ph:i*2.1, r:1.15 });
+  }
+  g.add(warmBot, coolBot, orbit);
+  updaters.push((t, dt) => {
+    orbit.rotation.y += dt*0.5;
+    for (const q of parts){
+      q.p.position.set(Math.cos(t*0.9 + q.ph)*q.r, Math.sin(t*1.3 + q.ph)*0.35, Math.sin(t*0.9 + q.ph)*q.r);
+    }
+  });
+  return g;
+}
+
+/* ---------- Outside of Work: a loose cluster of keepsakes ---------- */
+function buildOut(){
+  const g = new THREE.Group();
+  // boarding pass
+  const pass = new THREE.Group();
+  pass.add(box(1.0, 0.45, 0.04, zoneMat(COLORS.paper, { roughness:0.7 })));
+  const stripe = box(0.26, 0.45, 0.05, zoneMat(COLORS.gold)); stripe.position.x = 0.37;
+  const barcode = box(0.4, 0.06, 0.05, zoneMat(COLORS.ink)); barcode.position.set(-0.15, 0.1, 0);
+  const barcode2 = box(0.4, 0.04, 0.05, zoneMat(COLORS.ink)); barcode2.position.set(-0.15, -0.02, 0);
+  pass.add(stripe, barcode, barcode2);
+  pass.position.set(-0.9, 0.55, 0); pass.rotation.z = 0.2;
+  // chess pawn
+  const pawn = new THREE.Group();
+  const pm = zoneMat(0x4A4440);
+  const pBase = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.12, 10), pm);
+  const pNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.16, 0.3, 8), pm); pNeck.position.y = 0.2;
+  const pHead = new THREE.Mesh(new THREE.IcosahedronGeometry(0.14, 0), pm); pHead.position.y = 0.42;
+  pawn.add(pBase, pNeck, pHead); pawn.position.set(0.9, 0.6, 0.15);
+  // microphone (singing)
+  const mic = new THREE.Group();
+  const micHead = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18, 0), zoneMat(0x55504C));
+  const micBody = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.55, 8), zoneMat(COLORS.magenta));
+  micHead.position.y = 0.32;
+  mic.add(micHead, micBody); mic.rotation.z = -0.4; mic.position.set(-1.05, -0.5, 0.1);
+  // musical note
+  const note = new THREE.Group();
+  const nm = zoneMat(COLORS.ink);
+  const nHead = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 0), nm); nHead.scale.y = 0.75;
+  const stem = box(0.05, 0.5, 0.05, nm); stem.position.set(0.1, 0.28, 0);
+  const flag = box(0.16, 0.08, 0.05, nm); flag.position.set(0.16, 0.5, 0);
+  note.add(nHead, stem, flag); note.position.set(0.15, 0.95, -0.1);
+  // paintbrush
+  const brush = new THREE.Group();
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.7, 7), zoneMat(COLORS.wood));
+  const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 7), zoneMat(0xC9CCD4)); ferrule.position.y = 0.41;
+  const bristles = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 7), zoneMat(0xEADFC8)); bristles.position.y = 0.55;
+  const paint = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.09, 7), zoneMat(COLORS.magenta)); paint.position.y = 0.63;
+  brush.add(handle, ferrule, bristles, paint); brush.rotation.z = 0.9; brush.position.set(1.1, -0.35, -0.1);
+  // ramen bowl
+  const ramen = new THREE.Group();
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.22, 0.26, 10), zoneMat(0xD8503F));
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.34, 0.05, 10), zoneMat(COLORS.paper)); rim.position.y = 0.15;
+  const noodles = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 10), zoneMat(0xF2DCA0)); noodles.position.y = 0.19;
+  const stick1 = box(0.04, 0.62, 0.04, zoneMat(COLORS.wood)); stick1.position.set(0.16, 0.42, 0); stick1.rotation.z = 0.5;
+  const stick2 = box(0.04, 0.62, 0.04, zoneMat(COLORS.wood)); stick2.position.set(0.26, 0.42, 0.06); stick2.rotation.z = 0.55;
+  ramen.add(bowl, rim, noodles, stick1, stick2); ramen.position.set(-0.15, -0.85, 0.1);
+  g.add(pass, pawn, mic, note, brush, ramen);
+  // loose composed drift — a handful of keepsakes, not a menu grid
+  const items = [pass, pawn, mic, note, brush, ramen].map((o, i) => ({ o, ph:i*1.1, y:o.position.y }));
+  updaters.push((t) => {
+    if (REDUCED_MOTION) return;
+    for (const it of items){
+      it.o.position.y = it.y + Math.sin(t*0.8 + it.ph)*0.06;
+      it.o.rotation.y = Math.sin(t*0.4 + it.ph)*0.15;
+    }
+  });
+  return g;
+}
+
+/* ---------- Resume & Contact: a mock resume sheet + contact tag ---------- */
+function buildCV(){
+  const g = new THREE.Group();
+  const resumeTex = canvasTex(256, 340, (ctx) => { // mock page — replace with the real resume later
+    ctx.fillStyle = '#FFFDF6'; ctx.fillRect(0, 0, 256, 340);
+    ctx.fillStyle = '#3A3430'; ctx.fillRect(28, 26, 130, 18);   // name
+    ctx.fillStyle = '#C08A24'; ctx.fillRect(28, 52, 80, 8);     // title accent
+    ctx.fillStyle = '#D9CFC2';
+    let y = 84;
+    for (const w of [200, 180, 196, 150, 0, 188, 168, 204, 140]){ if (w) ctx.fillRect(28, y, w, 8); y += 18; }
+  });
+  const sheet = new THREE.Group();
+  sheet.add(box(1.15, 1.5, 0.03, zoneMat(COLORS.paper, { roughness:0.7 })));
+  const print = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.45),
+    new THREE.MeshBasicMaterial({ map:resumeTex, fog:false }));
+  print.position.z = 0.02;
+  sheet.add(print); sheet.rotation.z = 0.06;
+  const tag = new THREE.Group(); // name/contact chip alongside
+  tag.add(box(0.95, 0.3, 0.08, zoneMat(COLORS.gold)));
+  const l1 = box(0.55, 0.06, 0.03, zoneMat(COLORS.ink)); l1.position.set(-0.08, 0.05, 0.06);
+  const l2 = box(0.4, 0.05, 0.03, zoneMat(COLORS.ink));  l2.position.set(-0.15, -0.06, 0.06);
+  tag.add(l1, l2); tag.position.set(0.55, -0.95, 0.15); tag.rotation.z = -0.12;
+  g.add(sheet, tag);
+  return g;
+}
+
+/* ---------- Inner worlds, one per opening ---------- */
+const ENVS = {
+  // Calm, premium, minimal — the phone stays the hero (brief §UX)
+  ux(z){
+    const back = new THREE.MeshBasicMaterial({ map:gradientTex([[0,'#FFF6E8'],[1,'#FFDCC0']]), fog:false });
+    return makePocket(z.size[0]*0.98, z.size[1]*0.98, 4, back, 0xF7E2CB);
+  },
+  // Placeholder sky, consistent with the low-poly direction (brief §Arch)
+  arch(z){
+    const back = new THREE.MeshBasicMaterial({ map:gradientTex([[0,'#EAF3FF'],[1,'#C8DDF5']]), fog:false });
+    return makePocket(z.size[0]*0.98, z.size[1]*0.98, 4, back, 0xD3E3F4);
+  },
+  // White / warm coral / charcoal inset scene (brief §Lab)
+  lab(z){
+    const back = new THREE.MeshBasicMaterial({
+      map:gradientTex([[0,'#FFFFFF'],[0.5,'#F0B79E'],[0.58,'#E07856'],[0.66,'#2A2429'],[1,'#141216']]), fog:false });
+    const g = makePocket(z.size[0]*0.98, z.size[1]*0.98, 4, back, 0x241F26);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.06, 6, 24),
+      new THREE.MeshBasicMaterial({ color:COLORS.coral, fog:false }));
+    halo.position.z = -3.9;
+    g.add(halo);
+    return g;
+  },
+  // Airy green outdoors with drifting clouds, behind a subtle glass pane (brief §Outside)
+  out(z){
+    const back = new THREE.MeshBasicMaterial({
+      map:gradientTex([[0,'#BFE9FF'],[0.72,'#E8F7FF'],[1,'#CBEFC2']]), fog:false });
+    const g = makePocket(z.size[0]*0.98, z.size[1]*0.98, 4, back, 0xCDEBF7);
+    const hm = envMat(0x8FCB6B);
+    const h1 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.4, 0), hm); h1.scale.set(1.6, 0.55, 1); h1.position.set(-1.4, -2.7, -3.4);
+    const h2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.4, 0), hm); h2.scale.set(2, 0.7, 1);    h2.position.set(1.6, -2.9, -3.6);
+    g.add(h1, h2);
+    const cm = envMat(0xFFFFFF);
+    const clouds = [];
+    for (let i = 0; i < 3; i++){
+      const cl = new THREE.Group();
+      for (let j = 0; j < 3; j++){
+        const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.34 - j*0.07, 0), cm);
+        b.scale.y = 0.6; b.position.set(j*0.4 - 0.4, (j%2)*0.1, 0);
+        cl.add(b);
+      }
+      cl.position.set(-1.8 + i*1.7, 1.1 + (i%2)*0.9, -2.2 - i*0.5);
+      g.add(cl); clouds.push({ cl, x:cl.position.x, ph:i*2 });
+    }
+    // subtle glass treatment at the aperture: faint tinted pane + reflection streak
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(z.size[0]*0.94, z.size[1]*0.94),
+      new THREE.MeshBasicMaterial({ color:0xEAF7FF, transparent:true, opacity:0.07, fog:false, depthWrite:false }));
+    glass.position.z = -0.06;
+    const streak = new THREE.Mesh(new THREE.PlaneGeometry(0.5, z.size[1]*1.05),
+      new THREE.MeshBasicMaterial({ color:0xFFFFFF, transparent:true, opacity:0.1, fog:false, depthWrite:false }));
+    streak.rotation.z = 0.5; streak.position.set(0.8, 0, -0.05);
+    g.add(glass, streak);
+    updaters.push((t) => {
+      if (REDUCED_MOTION) return;
+      for (const q of clouds) q.cl.position.x = q.x + Math.sin(t*0.15 + q.ph)*0.5;
+    });
+    return g;
+  },
+  // Warm wooden desk with a pencil resting on it (brief §Resume)
+  cv(z){
+    const woodTex = canvasTex(256, 256, (ctx) => {
+      ctx.fillStyle = '#8A5A33'; ctx.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 6; i++){
+        ctx.fillStyle = i % 2 ? '#7C4F2B' : '#93613A'; ctx.fillRect(0, i*44, 256, 40);
+        ctx.fillStyle = 'rgba(60,35,15,0.35)'; ctx.fillRect(0, i*44 + 40, 256, 4);
+      }
+      ctx.fillStyle = 'rgba(255,225,180,0.15)';
+      for (let i = 0; i < 14; i++) ctx.fillRect(Math.random()*256, Math.random()*256, 30 + Math.random()*60, 2);
+    });
+    const back = new THREE.MeshBasicMaterial({ map:woodTex, fog:false });
+    const g = makePocket(z.size[0]*0.98, z.size[1]*0.98, 3, back, 0x6E4525);
+    const pencil = new THREE.Group();
+    const pb = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6), envMat(0xE7A33C));
+    const pt = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 6), envMat(0xE8CFA2)); pt.position.y = 0.63;
+    const pl = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.06, 6), envMat(0x3A3430)); pl.position.y = 0.72;
+    const pe = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.1, 6), envMat(0xE98FA0)); pe.position.y = -0.6;
+    pencil.add(pb, pt, pl, pe);
+    pencil.rotation.z = Math.PI/2 + 0.3; // lying flat on the desk
+    pencil.position.set(0.5, -0.9, -2.88);
+    g.add(pencil);
+    return g;
+  },
+};
+
+/* =========================================================================
+   6. The five zones — openings + objects, one hover-progress value each
+   ========================================================================= */
+const v3 = (x,y,z) => new THREE.Vector3(x,y,z);
+const ZONES = {
+  // Straight ahead — PRIMARY: biggest opening, most presence, deepest
+  ux:   { color:COLORS.centerGlow, center:v3(0, 0, -15.9),  normal:v3(0,0,1),  size:[9.5, 5.8],
+          rest:-1.8, out:3.4, restRot:[0, 1.35, 0], faceRot:[0, 0, 0],
+          baseScale:1.55, labelPos:v3(0, -3.5, -14.6), route:ROUTES.ux, build:buildUX },
+  // Left wall — Architecture (secondary)
+  arch: { color:COLORS.arch, center:v3(-11.9, 0, -6), normal:v3(1,0,0),  size:[8, 5],
+          rest:-1.5, out:2.7, restRot:[0, Math.PI/2 + 1.35, 0], faceRot:[0, Math.PI/2, 0],
+          baseScale:1.1, labelPos:v3(-10.4, -3.1, -6), route:ROUTES.arch, build:buildArch },
+  // Right wall — Learning Lab (secondary)
+  lab:  { color:COLORS.cyan, center:v3(11.9, 0, -6),  normal:v3(-1,0,0), size:[8, 5],
+          rest:-1.5, out:2.7, restRot:[0, -Math.PI/2 - 1.35, 0], faceRot:[0, -Math.PI/2, 0],
+          baseScale:1.1, labelPos:v3(10.4, -3.1, -6), route:ROUTES.lab, build:buildLab },
+  // Ceiling — Outside of Work (tertiary)
+  out:  { color:COLORS.magenta, center:v3(0, 4.9, -6),  normal:v3(0,-1,0), size:[7, 7],
+          rest:-1.4, out:2.4, restRot:[Math.PI/2 - 1.35, 0, 0], faceRot:[Math.PI/2, 0, 0],
+          baseScale:1.0, labelPos:v3(0, 3.4, -6), route:ROUTES.out, build:buildOut },
+  // Floor — Resume & Contact (always-available CTA; opens the modal)
+  cv:   { color:COLORS.gold, center:v3(0, -4.9, -2.5), normal:v3(0,1,0),  size:[4.5, 4.5],
+          rest:-1.1, out:1.9, restRot:[-Math.PI/2 + 1.35, 0, 0], faceRot:[-Math.PI/2, 0, 0],
+          baseScale:0.9, labelPos:v3(0, -3.3, -2.2), action:'contact', build:buildCV },
+};
+const raycastTargets = [];
+for (const [key, z] of Object.entries(ZONES)){
+  z.key = key;
+  z.hover = 0; z.hoverE = 0; z.ackT = null;
+  z.phase = Math.random()*Math.PI*2;
+  z.label = document.getElementById('label-' + key);
+
+  // Chunky toy picture-frame around the opening
+  const frame = makeChunkyFrame(z.size[0], z.size[1], z.color);
+  frame.position.copy(z.center);
+  frame.rotation.set(...z.faceRot);
+  scene.add(frame);
+  z.frameMat = frame.userData.mat;
+
+  // Floating echo slab just inside the room — the poster's flat-plane language,
+  // now as a soft translucent tile instead of a neon outline
+  const echo = new THREE.Mesh(
+    new THREE.BoxGeometry(z.size[0]*0.55, z.size[1]*0.55, 0.06),
+    (() => { const m = new THREE.MeshStandardMaterial({
+        color:COLORS.grid, roughness:0.9, transparent:true, opacity:0.1, flatShading:true });
+      m.userData.isGrid = true; return m; })()
+  );
+  echo.position.copy(z.center).addScaledVector(z.normal, 1.1);
+  echo.rotation.set(z.faceRot[0] + 0.16, z.faceRot[1] - 0.12, z.faceRot[2] + 0.1);
+  scene.add(echo);
+
+  // Recessed inner world visible through the opening (own scene per zone)
+  const env = ENVS[key](z);
+  env.position.copy(z.center);
+  env.rotation.set(...z.faceRot);
+  scene.add(env);
+
+  // Invisible hit plane covering the opening — reliable hover/click target
+  const hit = new THREE.Mesh(
+    new THREE.PlaneGeometry(z.size[0]*1.05, z.size[1]*1.05),
+    new THREE.MeshBasicMaterial({ visible:false })
+  );
+  hit.position.copy(z.center).addScaledVector(z.normal, 0.05);
+  hit.rotation.set(...z.faceRot);
+  hit.userData.zoneKey = key;
+  scene.add(hit);
+  raycastTargets.push(hit);
+
+  // The zone object itself, resting mostly behind its opening
+  z.group = z.build();
+  z.group.userData.zoneKey = key;
+  z.group.position.copy(z.center).addScaledVector(z.normal, z.rest);
+  z.group.rotation.set(...z.restRot);
+  z.group.scale.setScalar(z.baseScale);
+  z.mats = collectMats(z.group);
+  scene.add(z.group);
+  raycastTargets.push(z.group);
+}
+
+// --- UX preview drifters: a glimpse of the body of work at rest,
+//     more numerous/clearer on hover — no per-project click targets needed.
+const previews = [];
+{
+  for (let i = 0; i < 9; i++){
+    const geo = i % 2 ? new THREE.BoxGeometry(0.5, 0.34, 0.08) : new THREE.TetrahedronGeometry(0.26, 0);
+    const mat = new THREE.MeshStandardMaterial({
+      color:COLORS.centerGlow, roughness:0.8, flatShading:true,
+      emissive:COLORS.centerGlow, emissiveIntensity:0.15,
+      transparent:true, opacity:0.35,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    previews.push({
+      mesh, mat,
+      cx:0, cy:0, cz:-14.4,
+      r:1.1 + Math.random()*2.6, ry:0.7 + Math.random()*1.4,
+      speed:0.12 + Math.random()*0.16, phase:Math.random()*Math.PI*2,
+      always: i < 5, // first 5 visible at rest; the rest fade in on hover
+    });
+  }
+}
+
+/* =========================================================================
+   7. Input — mouse free-look, WASD movement, touch tilt/drag
+   ========================================================================= */
+let lookX = 0, lookY = 0;                    // -1..1 each axis
+const pointerNDC = new THREE.Vector2(0, 0);  // raycast point
+let hasPointer = false;
+let flying = null;                            // active click-flythrough, blocks input
+
+if (!IS_TOUCH){
+  addEventListener('mousemove', (e) => {
+    pointerNDC.set((e.clientX/innerWidth)*2 - 1, -(e.clientY/innerHeight)*2 + 1);
+    lookX = pointerNDC.x; lookY = pointerNDC.y;
+    hasPointer = true;
+  });
+}
+
+// --- Keyboard movement (WASD + arrows). No mobile equivalent by design.
+const keys = {};
+addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea')) return; // don't hijack the contact form
+  keys[e.code] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => { keys[e.code] = false; });
+const velocity = new THREE.Vector3();
+
+// --- Touch: drag adjusts both yaw and pitch; position stays at entry point.
+if (IS_TOUCH){
+  let last = null;
+  addEventListener('touchstart', (e) => { last = [e.touches[0].clientX, e.touches[0].clientY]; }, { passive:true });
+  addEventListener('touchmove', (e) => {
+    if (!last) return;
+    const x = e.touches[0].clientX, y = e.touches[0].clientY;
+    lookX = THREE.MathUtils.clamp(lookX - ((x - last[0]) / innerWidth) * 2.4, -1, 1);
+    lookY = THREE.MathUtils.clamp(lookY + ((y - last[1]) / innerHeight) * 2.4, -1, 1);
+    last = [x, y];
+  }, { passive:true });
+  addEventListener('touchend', () => { last = null; }, { passive:true });
+}
+
+// --- Touch: device orientation drives pitch as well as yaw.
+// Assumption: portrait-primary; gamma→yaw over ±28°, beta→pitch around a 45°
+// comfortable holding angle.
+function onOrientation(e){
+  if (e.gamma === null || e.gamma === undefined) return;
+  lookX = THREE.MathUtils.clamp(e.gamma / 28, -1, 1);
+  if (e.beta !== null) lookY = THREE.MathUtils.clamp((e.beta - 45) / 28, -1, 1) * -1;
+}
+const motionBtn = document.getElementById('motion-btn');
+if (IS_TOUCH && typeof DeviceOrientationEvent !== 'undefined'){
+  if (typeof DeviceOrientationEvent.requestPermission === 'function'){
+    motionBtn.classList.add('show');
+    motionBtn.addEventListener('click', async () => {
+      try {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res === 'granted') addEventListener('deviceorientation', onOrientation);
+      } catch(_) { /* denied/unavailable → drag fallback already active */ }
+      motionBtn.classList.remove('show');
+    });
+  } else {
+    addEventListener('deviceorientation', onOrientation);
+  }
+}
+
+/* =========================================================================
+   8. Raycasting, cursor, click sequence (ack → flythrough → navigate)
+   ========================================================================= */
+const raycaster = new THREE.Raycaster();
+let hoveredZone = null;
+
+function findHitZone(){
+  raycaster.setFromCamera(pointerNDC, camera);
+  const hits = raycaster.intersectObjects(raycastTargets, true);
+  for (const h of hits){
+    let o = h.object;
+    while (o){
+      if (o.userData.zoneKey) return o.userData.zoneKey;
+      o = o.parent;
+    }
+  }
+  return null;
+}
+
+// --- Dot-and-ring cursor ---
+const hand = document.getElementById('hand');
+if (!IS_TOUCH){
+  hand.classList.add('on');
+  addEventListener('mousemove', (e) => {
+    hand.style.left = e.clientX + 'px';
+    hand.style.top  = e.clientY + 'px';
+    // dim the cursor (and let the system cursor return) over UI chrome
+    hand.classList.toggle('off', !!e.target.closest('header, #drawer, #modal, #motion-btn'));
+  });
+}
+function setHandHover(zoneKey){
+  hand.classList.toggle('hover', !!zoneKey);
+  const hex = ZONE_HEX[currentTheme];
+  hand.style.setProperty('--hand-color', zoneKey ? hex[zoneKey] : hex.idle);
+}
+
+// --- Click: acknowledge animation, then flythrough (or modal for the floor) ---
+function startClick(key){
+  if (flying) return;
+  const z = ZONES[key];
+  z.ackT = clock.elapsedTime;              // drives the squash-and-back pulse
+  hand.classList.remove('click'); void hand.offsetWidth; hand.classList.add('click');
+  setTimeout(() => {
+    if (z.action === 'contact'){ setModal(true); return; } // floor zone: modal, no flythrough into the ground
+    const p1 = z.center.clone().addScaledVector(z.normal, -1.2); // just past the opening plane
+    const dummy = new THREE.Object3D();
+    dummy.position.copy(camera.position);
+    dummy.rotation.order = 'YXZ';
+    dummy.lookAt(z.center);
+    flying = { t:0, dur:1.0, route:z.route,
+      p0:camera.position.clone(), p1,
+      q0:camera.quaternion.clone(), q1:dummy.quaternion.clone() };
+  }, 340); // ack plays first
+}
+canvas.addEventListener('click', () => {
+  if (!hasPointer || flying) return;
+  const key = findHitZone();
+  if (key) startClick(key);
+});
+canvas.addEventListener('touchend', (e) => {
+  if (flying || !e.changedTouches.length) return;
+  const t = e.changedTouches[0];
+  pointerNDC.set((t.clientX/innerWidth)*2 - 1, -(t.clientY/innerHeight)*2 + 1);
+  const key = findHitZone();
+  if (key) startClick(key);
+});
+
+/* =========================================================================
+   9. Label projection — screen-space pills, never blurred (brief 08 §4):
+   labels live outside the 3D scene (no fog/bloom/depth applies to them),
+   pinned to the nearest screen edge with an arrow when out of frame,
+   pixel-snapped (Math.round) so the text never renders soft.
+   ========================================================================= */
+const _v = new THREE.Vector3();
+const EDGE = { x:90, top:100, bottom:120 }; // clamp margins, clear of chrome/HUD
+function placeLabel(el, pos, opacity){
+  _v.copy(pos).project(camera);
+  const behind = _v.z > 1;
+  let x = (_v.x*0.5 + 0.5)*innerWidth;
+  let y = (-_v.y*0.5 + 0.5)*innerHeight;
+  if (behind){ x = innerWidth - x; y = innerHeight - y; } // un-mirror the projection
+  const cx = THREE.MathUtils.clamp(x, EDGE.x, innerWidth - EDGE.x);
+  const cy = THREE.MathUtils.clamp(y, EDGE.top, innerHeight - EDGE.bottom);
+  let dir = '';
+  if (behind || x !== cx || y !== cy){
+    // dominant off-screen axis decides the arrow
+    const dx = x - cx, dy = y - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) dir = dx > 0 ? '→' : (dx < 0 ? '←' : (x < innerWidth/2 ? '←' : '→'));
+    else dir = dy > 0 ? '↓' : '↑';
+  }
+  el.setAttribute('data-dir', dir);
+  el.style.transform = `translate(-50%,-50%) translate(${Math.round(cx)}px, ${Math.round(cy)}px)`;
+  el.style.opacity = opacity;
+}
+const smoothstep = (x) => x*x*(3 - 2*x);
+
+/* =========================================================================
+   10. Render loop — frame-rate independent (delta time)
+   ========================================================================= */
+const clock = new THREE.Clock();
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _tvel = new THREE.Vector3();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const t  = clock.elapsedTime;
+  const damping = 1 - Math.pow(0.001, dt); // frame-rate independent lerp
+
+  if (flying){
+    // --- Click flythrough: short eased travel through the opening, then navigate ---
+    flying.t += dt / flying.dur;
+    const k = smoothstep(Math.min(flying.t, 1));
+    camera.position.lerpVectors(flying.p0, flying.p1, k);
+    camera.quaternion.slerpQuaternions(flying.q0, flying.q1, Math.min(flying.t*1.7, 1));
+    if (flying.t >= 1){ location.href = flying.route; flying.t = -Infinity; }
+  } else {
+    // --- Free look: damped yaw + pitch (sign flipped so mouse-right looks right) ---
+    const targetYaw   = -lookX * YAW_RANGE;
+    const targetPitch = THREE.MathUtils.clamp(lookY * PITCH_RANGE, -PITCH_RANGE, PITCH_RANGE);
+    camera.rotation.y += (targetYaw   - camera.rotation.y) * damping;
+    camera.rotation.x += (targetPitch - camera.rotation.x) * damping;
+
+    // --- WASD / arrow movement in the yaw plane, soft-bounded to the room ---
+    const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+    const r = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+    _fwd.set(-Math.sin(camera.rotation.y), 0, -Math.cos(camera.rotation.y));
+    _right.set(Math.cos(camera.rotation.y), 0, -Math.sin(camera.rotation.y));
+    _tvel.set(0,0,0).addScaledVector(_fwd, f).addScaledVector(_right, r);
+    if (_tvel.lengthSq() > 0) _tvel.normalize().multiplyScalar(MOVE_SPEED);
+    velocity.lerp(_tvel, Math.min(dt*8, 1));
+    camera.position.addScaledVector(velocity, dt);
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -BOUNDS.x, BOUNDS.x);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, BOUNDS.zMin, BOUNDS.zMax);
+    camera.position.y = 0; // eye level fixed
+  }
+
+  // --- Hover raycast (desktop only; touch has no hover) ---
+  hoveredZone = (!IS_TOUCH && hasPointer && !flying) ? findHitZone() : null;
+  setHandHover(hoveredZone);
+
+  // --- Per-zone update: one hover-progress value drives emergence, rotation,
+  //     brightness, label, frame and scale together ---
+  for (const z of Object.values(ZONES)){
+    const target = hoveredZone === z.key ? 1 : 0;
+    z.hover += (target - z.hover) * Math.min(dt*5.5, 1); // ~300ms eased transition
+    const e = smoothstep(z.hover);
+    z.hoverE = e;
+
+    // emerge out of the opening toward the visitor
+    const d = THREE.MathUtils.lerp(z.rest, z.out, e);
+    z.group.position.copy(z.center).addScaledVector(z.normal, d);
+    // idle drift (always) — distinct from the hover wobble below
+    if (!REDUCED_MOTION) z.group.position.addScaledVector(z.normal, Math.sin(t*0.7 + z.phase)*0.07);
+
+    // turn from edge-on sliver to facing the room
+    z.group.rotation.set(
+      THREE.MathUtils.lerp(z.restRot[0], z.faceRot[0], e),
+      THREE.MathUtils.lerp(z.restRot[1], z.faceRot[1], e),
+      THREE.MathUtils.lerp(z.restRot[2], z.faceRot[2], e)
+    );
+    if (!REDUCED_MOTION && z.hover > 0.02) z.group.rotation.z += Math.sin(t*5.5)*0.045*e; // hover wobble
+
+    // click "acknowledged" squash-and-back pulse
+    let sq = 1;
+    if (z.ackT !== null){
+      const el = t - z.ackT;
+      if (el < 0.35) sq = 1 - 0.28*Math.sin((el/0.35)*Math.PI);
+      else z.ackT = null;
+    }
+    z.group.scale.setScalar(z.baseScale * (1 + 0.08*e) * sq);
+
+    // brightness: gentle emissive lift on hover (replaces the old neon-opacity ramp)
+    const lift = THREE.MathUtils.lerp(0, 0.42, e);
+    for (const m of z.mats) m.emissiveIntensity = m.userData.baseEmissive + lift;
+    z.frameMat.emissiveIntensity = THREE.MathUtils.lerp(0.12, 0.55, e);
+
+    // §1 (09): labels legible at rest for every zone (hover just brightens);
+    // the object's own partial-reveal-on-hover behavior is unchanged
+    placeLabel(z.label, z.labelPos, THREE.MathUtils.lerp(0.85, 1, e));
+  }
+
+  // --- UX preview drifters: slow orbit; extra ones clarify on zone hover ---
+  const uxE = ZONES.ux.hoverE;
+  for (const p of previews){
+    const a = t*p.speed + p.phase;
+    p.mesh.position.set(p.cx + Math.cos(a)*p.r, p.cy + Math.sin(a*0.8)*p.ry, p.cz + Math.sin(a)*0.7);
+    p.mesh.rotation.y += dt*0.35;
+    p.mat.opacity = p.always ? 0.35 + 0.45*uxE : 0.85*uxE;
+  }
+
+  // --- Zone asset & inner-world animations (phone screen, orbits, drift, clouds) ---
+  for (const u of updaters) u(t, dt);
+
+  composer.render();
+}
+animate();
+
+/* =========================================================================
+   11. Resize — camera aspect + renderer + composer (incl. phone rotation)
+   ========================================================================= */
+addEventListener('resize', () => {
+  const a = innerWidth / innerHeight;
+  camera.aspect = a;
+  camera.fov = fovForAspect(a);
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
+});
+
+/* =========================================================================
+   12. UI overlay logic: theme toggle, hint, drawer, contact modal
+   ========================================================================= */
+// --- Dark/light mode toggle: swaps background, grid, and lighting only —
+// zone accents stay identical across modes so color = identity (brief §3).
+// Light mode is its own design (bright sketchbook), not an inversion (§2).
+const THEMES = {
+  dark:  { bg:0x1C1A1E, grid:0x6B6560, starOp:0.4,
+           hemiSky:0x9C8CA8, hemiGround:0x3A322C, hemiInt:0.55,
+           sunColor:0xFFC98A, sunInt:1.15, ambInt:0.12,
+           exposure:1.0, bloomStrength:(IS_TOUCH ? 0.25 : 0.35) },
+  light: { bg:0xF5F1E8, grid:0xB8AFA4, starOp:0,
+           hemiSky:0xFFFFFF, hemiGround:0xD9CFBE, hemiInt:1.0,
+           sunColor:0xFFF1D8, sunInt:0.95, ambInt:0.4,
+           exposure:1.06, bloomStrength:0.1 },
+};
+const modeBtn = document.getElementById('mode-btn');
+function applyTheme(name){
+  currentTheme = name;
+  const T = THEMES[name];
+  document.documentElement.dataset.theme = name === 'light' ? 'light' : '';
+  scene.background.set(T.bg);
+  scene.fog.color.set(T.bg);
+  starMat.opacity = T.starOp;
+  scene.traverse(o => {
+    const m = o.material;
+    if (m && m.userData && m.userData.isGrid) m.color.set(T.grid);
+  });
+  hemi.color.set(T.hemiSky); hemi.groundColor.set(T.hemiGround); hemi.intensity = T.hemiInt;
+  sun.color.set(T.sunColor); sun.intensity = T.sunInt;
+  amb.intensity = T.ambInt;
+  renderer.toneMappingExposure = T.exposure;
+  bloom.strength = T.bloomStrength;
+  modeBtn.setAttribute('aria-label', name === 'light' ? 'Switch to dark mode' : 'Switch to light mode');
+  modeBtn.setAttribute('aria-pressed', String(name === 'light'));
+}
+// NOTE: theme is per-session only — deliberately no localStorage/sessionStorage.
+// Toggling swaps materials/lights in place: no reload, camera position kept (§2).
+modeBtn.addEventListener('click', () => applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
+
+const hint = document.getElementById('hint');
+hint.textContent = IS_TOUCH ? 'Tilt your phone or drag to look around' : 'Move your mouse to look · WASD to walk';
+setTimeout(() => hint.classList.add('show'), 600);
+setTimeout(() => hint.classList.remove('show'), 4600);
+
+// --- Menu drawer ---
+const drawer = document.getElementById('drawer');
+const drawerScrim = document.getElementById('drawer-scrim');
+const menuBtn = document.getElementById('menu-btn');
+function setDrawer(open){
+  drawer.classList.toggle('open', open);
+  drawerScrim.classList.toggle('open', open);
+  drawer.setAttribute('aria-hidden', String(!open));
+  menuBtn.setAttribute('aria-expanded', String(open));
+}
+menuBtn.addEventListener('click', () => setDrawer(true));
+document.getElementById('drawer-close').addEventListener('click', () => setDrawer(false));
+drawerScrim.addEventListener('click', () => setDrawer(false));
+
+// --- Contact modal ---
+const modal = document.getElementById('modal');
+const modalScrim = document.getElementById('modal-scrim');
+function setModal(open){
+  modal.classList.toggle('open', open);
+  modalScrim.classList.toggle('open', open);
+  modal.setAttribute('aria-hidden', String(!open));
+  if (open) document.getElementById('cf-name').focus();
+}
+document.getElementById('contact-btn').addEventListener('click', () => setModal(true));
+document.getElementById('drawer-contact').addEventListener('click', () => { setDrawer(false); setModal(true); });
+document.getElementById('modal-close').addEventListener('click', () => setModal(false));
+modalScrim.addEventListener('click', () => setModal(false));
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape'){ setModal(false); setDrawer(false); }
+});
+
+// Copy email to clipboard with "Copied!" confirmation
+const copyBtn = document.getElementById('copy-btn');
+copyBtn.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(CONTACT_EMAIL); }
+  catch(_) { // fallback for older/insecure contexts
+    const ta = document.createElement('textarea');
+    ta.value = CONTACT_EMAIL; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  copyBtn.textContent = 'Copied!';
+  copyBtn.classList.add('copied');
+  setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1800);
+});
+
+// Form "send": no backend — opens mail client via prefilled mailto:
+document.getElementById('contact-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = document.getElementById('cf-name').value.trim();
+  const email = document.getElementById('cf-email').value.trim();
+  const msg = document.getElementById('cf-msg').value.trim();
+  const subject = encodeURIComponent(`Portfolio contact${name ? ' — ' + name : ''}`);
+  const body = encodeURIComponent(`${msg}\n\n— ${name || 'Anonymous'}${email ? ' (' + email + ')' : ''}`);
+  location.href = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`;
+});
+</script>
+</body>
+</html>
